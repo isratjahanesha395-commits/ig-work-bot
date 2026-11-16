@@ -25,7 +25,6 @@ def get_user(uid, refer_by=None):
 def get_lang(uid):
     con=db(); cur=con.cursor(); cur.execute("SELECT lang FROM users WHERE id=?", (uid,)); r=cur.fetchone(); con.close(); return r[0] if r else 'bn'
 
-# ===== ভাষা - বাংলা হলে সব বাংলা, English হলে সব English =====
 T = {
  'bn': {
   'welcome': "👋 আসসালামু আলাইকুম!\n\n🌟 Nexora X Earn এ স্বাগতম!\n\nনিচে থেকে যেকোনো কাজ করে টাকা ইনকাম করতে পারবেন।\n\n👇 নিচ থেকে একটা অপশন বেছে নিন",
@@ -39,6 +38,10 @@ T = {
   'no_bal_rocket': "❌ আপনার ব্যালেন্স পর্যাপ্ত নয়। Rocket-এ উইথড্র দিতে কমপক্ষে 110.00 ৳ প্রয়োজন.\nআপনার বর্তমান ব্যালেন্স: {bal:.2f} ৳",
   'referral': "🎁 My Referrals\n👤 মোট রেফার: {cnt}\n😃 মোট রেফারেল আয়: {rinc:.2f} BDT\n🔗 আপনার রেফার লিংক:\n{link}\n\nℹ️ আপনি আপনার প্রতিটি রেফারেলের সম্পূর্ণ করা কাজ থেকে আয়ের 10% কমিশন পাবেন।",
   'admin_menu': ["📝 নতুন কাজ যোগ করুন","📋 কাজ ম্যানেজ করুন","🎁 গিফট কোড তৈরি করুন","💸 উইথড্র রিকোয়েস্ট দেখুন","👥 ইউজার লিস্ট দেখুন","📊 বটের পরিসংখ্যান","📢 ব্রডকাস্ট","✅ পেন্ডিং সাবমিশন","👑 অ্যাডমিন যোগ/বাদ","⚙️ সেটিংস","🛠 মেইনটেনেন্স মোড","🔙 ব্যাক"],
+  'support_text': "📞 গ্রাহক সেবা কেন্দ্র\n━━━━━━━━━━━━━━━━━━━━━━\n\nসম্মানিত মেম্বার,\nআপনার যেকোনো সমস্যা বা জিজ্ঞাসার জন্য আমাদের সাপোর্ট টিমের সাথে যোগাযোগ করুন। আমরা দ্রুত সমাধানের চেষ্টা করব।\n⚠️ নোট: অযথা মেসেজ দেওয়া থেকে বিরত থাকুন।\nধন্যবাদ!",
+  'support_btn1': "👨‍💻 অ্যাডমিন সাপোর্ট",
+  'support_btn2': "📋 সাবমিশন চ্যানেল",
+  'partner_text': "😭 আপনার পার্টনার বট প্রোগ্রাম বর্তমানে বন্ধ আছে।\n\n✅ আপনার এক্সেস চালু করতে অ্যাডমিনের সাথে যোগাযোগ করুন⤵️\n➡️ INBOX - @Nexora_X_Support_Bot",
  },
  'en': {
   'welcome': "👋 Assalamu Alaikum!\n\n🌟 Welcome to Nexora X Earn!\n\nEarn money by completing tasks below.\n\n👇 Choose an option",
@@ -52,6 +55,10 @@ T = {
   'no_bal_rocket': "❌ Your balance is not enough. You need at least 110.00 ৳ to withdraw via Rocket.\nYour current balance: {bal:.2f} ৳",
   'referral': "🎁 My Referrals\n👤 Total Refer: {cnt}\n😃 Total Refer Income: {rinc:.2f} BDT\n🔗 Your Refer Link:\n{link}\n\nℹ️ You will get 10% commission from each referral's completed task income.",
   'admin_menu': ["📝 Add New Task","📋 Manage Tasks","🎁 Create Gift Code","💸 Withdraw Requests","👥 User List","📊 Bot Statistics","📢 Broadcast","✅ Pending Submissions","👑 Add/Remove Admin","⚙️ Settings","🛠 Maintenance Mode","🔙 Back"],
+  'support_text': "📞 Customer Service Center\n━━━━━━━━━━━━━━━━━━━━━━\n\nDear Member,\nFor any problem or question, contact our support team. We will try to solve it quickly.\n⚠️ Note: Avoid sending unnecessary messages.\nThank you!",
+  'support_btn1': "👨‍💻 Admin Support",
+  'support_btn2': "📋 Submission Channel",
+  'partner_text': "😭 Your Partner Bot program is currently closed.\n\n✅ To activate your access, contact admin⤵️\n➡️ INBOX - @Nexora_X_Support_Bot",
  }
 }
 
@@ -93,7 +100,6 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bal, pen, tot, done, rev, rej = row
     state=context.user_data.get('state')
 
-    # BACK
     if text in ["🔙 ব্যাক","🔙 Back"]:
         context.user_data['state']=None
         await update.message.reply_text(T[lang]['welcome'], reply_markup=main_menu(uid)); con.close(); return
@@ -109,14 +115,11 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"📝 {title}\n💰 Reward: {reward} BDT", reply_markup=kb)
         con.close(); return
 
-    # ===== WITHDRAW - এখন সব Reply Keyboard =====
     if text in ["টাকা উত্তোলন","Withdraw"]:
         await update.message.reply_text(T[lang]['wd_menu'], reply_markup=wd_menu_kb(uid)); con.close(); return
 
-    # USDT
     if text.startswith("USDT"):
-        await update.message.reply_text("⚠️ USDT (BEP-20) উত্তোলন বর্তমানে বন্ধ আছে।"); con.close(); return
-    # বিকাশ
+        await update.message.reply_text("⚠️ USDT (BEP-20) উত্তোলন বর্তমানে বন্ধ আছে।" if lang=='bn' else "⚠️ USDT (BEP-20) withdrawal is currently closed."); con.close(); return
     if "বিকাশ" in text or "Bkash" in text:
         if bal < 110:
             await update.message.reply_text(T[lang]['no_bal_bkash'].format(bal=bal)); con.close(); return
@@ -133,7 +136,6 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['state']='wd_rocket'; context.user_data.pop('number',None); context.user_data.pop('await_amount',None)
         await update.message.reply_text("📝 আপনার রকেট নাম্বার দিন:" if lang=='bn' else "📝 Enter your Rocket number:"); con.close(); return
 
-    # Withdraw flow: number -> amount
     if state and state.startswith("wd_"):
         method=state.split("_")[1]
         if 'number' not in context.user_data:
@@ -160,23 +162,22 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(T[lang]['referral'].format(cnt=cnt, rinc=rinc, link=link)); con.close(); return
 
     if text in ["সাপোর্ট","Support"]:
-        kb=InlineKeyboardMarkup([[InlineKeyboardButton("👨‍💻 অ্যাডমিন সাপোর্ট", url="https://t.me/Nexora_X_Support_Bot")],[InlineKeyboardButton("📋 সাবমিশন চ্যানেল", url="https://t.me/Nexora_X_Submission")]])
-        await update.message.reply_text("📞 গ্রাহক সেবা কেন্দ্র\n━━━━━━━━━━━━━━━━━━━━━━\n\nসম্মানিত মেম্বার,\nআপনার যেকোনো সমস্যা বা জিজ্ঞাসার জন্য আমাদের সাপোর্ট টিমের সাথে যোগাযোগ করুন। আমরা দ্রুত সমাধানের চেষ্টা করব।\n⚠️ নোট: অযথা মেসেজ দেওয়া থেকে বিরত থাকুন।\nধন্যবাদ!", reply_markup=kb); con.close(); return
+        kb=InlineKeyboardMarkup([[InlineKeyboardButton(T[lang]['support_btn1'], url="https://t.me/Nexora_X_Support_Bot")],[InlineKeyboardButton(T[lang]['support_btn2'], url="https://t.me/Nexora_X_Submission")]])
+        await update.message.reply_text(T[lang]['support_text'], reply_markup=kb); con.close(); return
 
-    # GIFT CODE - ঠিক করা নাম
     if text in ["🎁 গিফট কোড","🎁 Gift Code"]:
         context.user_data['state']='gift'
         await update.message.reply_text("🎁 গিফট কোড\n\nআপনার গিফট কোডের সিক্রেট কী লিখে পাঠান:" if lang=='bn' else "🎁 Gift Code\n\nSend your gift code secret key:"); con.close(); return
     if state=='gift':
         cur.execute("SELECT amount, used_by FROM giftcodes WHERE code=?", (text.strip(),)); g=cur.fetchone()
-        if not g: await update.message.reply_text("❌ ভুল কোড!")
-        elif str(uid) in g[1].split(","): await update.message.reply_text("❌ এই কোড আগেই ব্যবহার করেছেন!")
+        if not g: await update.message.reply_text("❌ ভুল কোড!" if lang=='bn' else "❌ Wrong code!")
+        elif str(uid) in g[1].split(","): await update.message.reply_text("❌ এই কোড আগেই ব্যবহার করেছেন!" if lang=='bn' else "❌ You already used this code!")
         else:
             amt=g[0]
             cur.execute("UPDATE users SET balance=balance+?, total_income=total_income+? WHERE id=?", (amt, amt, uid))
             cur.execute("UPDATE giftcodes SET used_by=? WHERE code=?", (g[1]+f",{uid}", text.strip())); con.commit()
             cur.execute("SELECT balance FROM users WHERE id=?", (uid,)); newbal=cur.fetchone()[0]
-            await update.message.reply_text(f"🎉 অভিনন্দন!\n\n✨ গিফট কোড সফলভাবে ক্লেইম হয়েছে।\n\n💸 আপনি পেয়েছেন: {amt} টাকা\n💸 বর্তমান ব্যালেন্স: {newbal:.2f} BDT")
+            await update.message.reply_text(f"🎉 অভিনন্দন!\n\n✨ গিফট কোড সফলভাবে ক্লেইম হয়েছে।\n\n💸 আপনি পেয়েছেন: {amt} টাকা\n💸 বর্তমান ব্যালেন্স: {newbal:.2f} BDT" if lang=='bn' else f"🎉 Congratulations!\n\n✨ Gift code claimed successfully.\n\n💸 You got: {amt} BDT\n💸 Current Balance: {newbal:.2f} BDT")
         context.user_data['state']=None; con.close(); return
 
     if text in ["ভাষা পরিবর্তন","Change Language"]:
@@ -184,28 +185,26 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ভাষা সিলেক্ট করুন / Select Language:", reply_markup=kb); con.close(); return
 
     if text in ["পার্টনার বট","Partner Bot"]:
-        await update.message.reply_text("😭 আপনার পার্টনার বট প্রোগ্রাম বর্তমানে বন্ধ আছে।\n\n✅ আপনার এক্সেস চালু করতে অ্যাডমিনের সাথে যোগাযোগ করুন⤵️\n➡️ INBOX - @Nexora_X_Support_Bot"); con.close(); return
+        await update.message.reply_text(T[lang]['partner_text']); con.close(); return
 
-    # ===== ADMIN PANEL - এখন সব Reply Keyboard =====
     if text in ["অ্যাডমিন প্যানেল","Admin Panel"] and uid in ADMIN_IDS:
         await update.message.reply_text("👑 অ্যাডমিন প্যানেল" if lang=='bn' else "👑 Admin Panel", reply_markup=admin_menu_kb(uid)); con.close(); return
 
-    # Admin Reply Buttons
     if uid in ADMIN_IDS and text in T[lang]['admin_menu']:
         if "নতুন কাজ" in text or "Add New Task" in text:
-            context.user_data['state']='addtask'; await update.message.reply_text("নতুন কাজ লিখুন:\nশিরোনাম | বিবরণ | টাকা | লিংক"); con.close(); return
+            context.user_data['state']='addtask'; await update.message.reply_text("নতুন কাজ লিখুন:\nশিরোনাম | বিবরণ | টাকা | লিংক" if lang=='bn' else "Enter new task:\nTitle | Description | Amount | Link"); con.close(); return
         if "গিফট কোড তৈরি" in text or "Create Gift Code" in text:
             context.user_data['state']='addgift'; await update.message.reply_text("গিফট কোড লিখুন:\nকোড | টাকা\nউদাহরণ: NEXORA50 | 50"); con.close(); return
         if "উইথড্র রিকোয়েস্ট" in text or "Withdraw Requests" in text:
             cur.execute("SELECT id, user_id, method, number, amount FROM withdraws WHERE status='pending'"); rows=cur.fetchall()
-            if not rows: await update.message.reply_text("কোনো পেন্ডিং উইথড্র নেই।")
+            if not rows: await update.message.reply_text("কোনো পেন্ডিং উইথড্র নেই।" if lang=='bn' else "No pending withdraw.")
             for r in rows:
                 kb=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Approve", callback_data=f"wd_ok_{r[0]}"), InlineKeyboardButton("❌ Reject", callback_data=f"wd_no_{r[0]}")]])
                 await update.message.reply_text(f"ID: {r[0]}\nUser: {r[1]}\nMethod: {r[2]}\nNumber: {r[3]}\nAmount: {r[4]}", reply_markup=kb)
             con.close(); return
         if "কাজ ম্যানেজ" in text or "Manage Tasks" in text:
             cur.execute("SELECT id, title FROM tasks"); rows=cur.fetchall()
-            if not rows: await update.message.reply_text("কোনো কাজ নেই।")
+            if not rows: await update.message.reply_text("কোনো কাজ নেই।" if lang=='bn' else "No tasks.")
             for r in rows:
                 kb=InlineKeyboardMarkup([[InlineKeyboardButton("🗑 ডিলিট", callback_data=f"del_task_{r[0]}")]])
                 await update.message.reply_text(f"{r[0]}. {r[1]}", reply_markup=kb)
@@ -217,23 +216,22 @@ async def handle_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cur.execute("SELECT COUNT(*) FROM users"); u=cur.fetchone()[0]
             cur.execute("SELECT COUNT(*) FROM withdraws WHERE status='approved'"); w=cur.fetchone()[0]
             cur.execute("SELECT SUM(amount) FROM withdraws WHERE status='approved'"); s=cur.fetchone()[0] or 0
-            await update.message.reply_text(f"📊 পরিসংখ্যান\n👥 Users: {u}\n💸 Approved Withdraw: {w}\n💰 Total Paid: {s:.2f} BDT"); con.close(); return
+            await update.message.reply_text(f"📊 পরিসংখ্যান\n👥 Users: {u}\n💸 Approved Withdraw: {w}\n💰 Total Paid: {s:.2f} BDT" if lang=='bn' else f"📊 Statistics\n👥 Users: {u}\n💸 Approved Withdraw: {w}\n💰 Total Paid: {s:.2f} BDT"); con.close(); return
         if "ব্রডকাস্ট" in text or "Broadcast" in text:
-            context.user_data['state']='broadcast'; await update.message.reply_text("সবাইকে কি মেসেজ পাঠাতে চান? মেসেজটি লিখুন:"); con.close(); return
+            context.user_data['state']='broadcast'; await update.message.reply_text("সবাইকে কি মেসেজ পাঠাতে চান? মেসেজটি লিখুন:" if lang=='bn' else "What message do you want to send to all? Write it:"); con.close(); return
         if "পেন্ডিং সাবমিশন" in text or "Pending Submissions" in text:
             cur.execute("SELECT id, user_id, task_id, proof FROM submissions WHERE status='pending'"); rows=cur.fetchall()
-            if not rows: await update.message.reply_text("কোনো পেন্ডিং সাবমিশন নেই।")
+            if not rows: await update.message.reply_text("কোনো পেন্ডিং সাবমিশন নেই।" if lang=='bn' else "No pending submissions.")
             for r in rows:
                 kb=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Approve", callback_data=f"sub_ok_{r[0]}"), InlineKeyboardButton("❌ Reject", callback_data=f"sub_no_{r[0]}")]])
                 await update.message.reply_text(f"Sub ID: {r[0]}\nUser: {r[1]}\nTask: {r[2]}\nProof: {r[3]}", reply_markup=kb)
             con.close(); return
         if "অ্যাডমিন যোগ" in text or "Add/Remove Admin" in text:
-            await update.message.reply_text("👑 অ্যাডমিন যোগ করতে কোডে ADMIN_IDS এ ID যোগ করতে হবে। বর্তমান অ্যাডমিন: 9292138695"); con.close(); return
+            await update.message.reply_text("👑 অ্যাডমিন যোগ করতে কোডে ADMIN_IDS এ ID যোগ করতে হবে। বর্তমান অ্যাডমিন: 9292138695" if lang=='bn' else "👑 To add admin, add ID in ADMIN_IDS in code. Current admin: 9292138695"); con.close(); return
         if "সেটিংস" in text or "Settings" in text:
-            await update.message.reply_text("⚙️ সেটিংস\nমিনিমাম উইথড্র: 110৳\nরেফার কমিশন: 10%\nUSDT: বন্ধ\nপার্টনার বট: বন্ধ"); con.close(); return
+            await update.message.reply_text("⚙️ সেটিংস\nমিনিমাম উইথড্র: 110৳\nরেফার কমিশন: 10%\nUSDT: বন্ধ\nপার্টনার বট: বন্ধ" if lang=='bn' else "⚙️ Settings\nMinimum Withdraw: 110৳\nRefer Commission: 10%\nUSDT: Closed\nPartner Bot: Closed"); con.close(); return
         if "মেইনটেনেন্স" in text or "Maintenance" in text:
-            await update.message.reply_text("🛠 মেইনটেনেন্স মোড - এখনো বন্ধ আছে। চালু করতে চাইলে আমাকে বলেন।"); con.close(); return
-
+            await update.message.reply_text("🛠 মেইনটেনেন্স মোড - এখনো বন্ধ আছে।" if lang=='bn' else "🛠 Maintenance Mode - Currently off."); con.close(); return
     con.close()
 
 async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -250,7 +248,7 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.message.reply_text(f"📝 {t[0]}\n\n{t[1]}\n\n💰 Reward: {t[2]} BDT", reply_markup=kb)
     elif data.startswith("submit_"):
         tid=int(data.split("_")[1]); context.user_data['state']=f"submit_{tid}"
-        await q.message.reply_text("📸 কাজের প্রমাণ (স্ক্রিনশট / লিংক) পাঠান:")
+        await q.message.reply_text("📸 কাজের প্রমাণ (স্ক্রিনশট / লিংক) পাঠান:" if get_lang(uid)=='bn' else "📸 Send proof (Screenshot / Link):")
     elif data.startswith("wd_ok_"):
         wid=int(data.split("_")[2]); cur.execute("SELECT user_id, amount FROM withdraws WHERE id=?", (wid,)); w=cur.fetchone()
         cur.execute("UPDATE withdraws SET status='approved' WHERE id=?", (wid,)); cur.execute("UPDATE users SET pending=pending-? WHERE id=?", (w[1], w[0])); con.commit()
@@ -282,7 +280,7 @@ async def handle_extra(update: Update, context: ContextTypes.DEFAULT_TYPE):
     con=db(); cur=con.cursor()
     if state.startswith("submit_"):
         tid=int(state.split("_")[1]); cur.execute("INSERT INTO submissions (user_id, task_id, proof) VALUES (?,?,?)", (uid, tid, text)); cur.execute("UPDATE users SET review=review+1 WHERE id=?", (uid,)); con.commit()
-        await update.message.reply_text("✅ সাবমিশন জমা হয়েছে, রিভিউতে আছে."); context.user_data['state']=None
+        await update.message.reply_text("✅ সাবমিশন জমা হয়েছে, রিভিউতে আছে." if get_lang(uid)=='bn' else "✅ Submission received, in review."); context.user_data['state']=None
     elif state=='addtask' and uid in ADMIN_IDS:
         try:
             title, desc, reward, link=[x.strip() for x in text.split("|")]; cur.execute("INSERT INTO tasks (title, desc, reward, link) VALUES (?,?,?,?)", (title, desc, float(reward), link)); con.commit(); await update.message.reply_text("✅ কাজ যোগ হয়েছে!")
