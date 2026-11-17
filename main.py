@@ -1,10 +1,29 @@
 import os, sqlite3
+from flask import Flask
+from threading import Thread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 TOKEN = os.environ.get("BOT_TOKEN")
 ADMIN_IDS = [9292138695]
 DB = "bot.db"
+
+# --- Keep Alive Server for UptimeRobot ---
+web_app = Flask(__name__)
+
+@web_app.route('/')
+def home():
+    return "Nexora X Earn Bot is Alive!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    web_app.run(host="0.0.0.0", port=port)
+
+def keep_alive():
+    t = Thread(target=run_web)
+    t.daemon = True
+    t.start()
+# -----------------------------------------
 
 def db():
     con = sqlite3.connect(DB)
@@ -300,6 +319,7 @@ async def handle_extra(update: Update, context: ContextTypes.DEFAULT_TYPE):
     con.close()
 
 def main():
+    keep_alive()
     db(); app=Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start)); app.add_handler(CallbackQueryHandler(callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_extra), group=0)
