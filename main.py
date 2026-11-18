@@ -1,78 +1,64 @@
-# main.py - DEMO BOT + SQLite Database
-# আসল পাসওয়ার্ড / কুকিজ / 2FA নেওয়া হয় না, সব ডেমো ডাটা
-
-import sqlite3
-import logging
+import os, sqlite3, random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
 
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
-MAIN_ADMIN_ID = 123456789  # আপনার Telegram ID বসান
-DB_FILE = "bot.db"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN")
+OWNER_ID = int(os.getenv("OWNER_ID", "0"))
+SUPPORT_BOT = "@Nexora_X_Support_Bot"
+SUBMISSION_CHANNEL = "https://t.me/Nexora_X_Submission"
 
-logging.basicConfig(level=logging.INFO)
+# ---------- DB ----------
+conn = sqlite3.connect("bot.db", check_same_thread=False)
+cur = conn.cursor()
+cur.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT, balance REAL DEFAULT 0, total_income REAL DEFAULT 0, done INTEGER DEFAULT 0, pending INTEGER DEFAULT 0, rejected INTEGER DEFAULT 0, lang TEXT DEFAULT 'bn', ref_by INTEGER DEFAULT 0, ref_earn REAL DEFAULT 0)")
+cur.execute("CREATE TABLE IF NOT EXISTS admins (id INTEGER PRIMARY KEY)")
+cur.execute("CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT, title TEXT, price REAL, data TEXT)")
+cur.execute("CREATE TABLE IF NOT EXISTS withdraws (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, method TEXT, number TEXT, amount REAL, status TEXT DEFAULT 'pending')")
+cur.execute("CREATE TABLE IF NOT EXISTS gift_codes (code TEXT PRIMARY KEY, amount REAL, used_by TEXT DEFAULT '')")
+cur.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
+cur.execute("INSERT OR IGNORE INTO settings VALUES ('maintenance','off')")
+conn.commit()
 
-# ===== DATABASE =====
-def db():
-    conn = sqlite3.connect(DB_FILE)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def init_db():
-    conn = db()
-    c = conn.cursor()
-    c.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, name TEXT, balance REAL DEFAULT 0)")
-    c.execute("CREATE TABLE IF NOT EXISTS admins (user_id INTEGER PRIMARY KEY)")
-    c.execute("CREATE TABLE IF NOT EXISTS withdraws (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount REAL, status TEXT DEFAULT 'pending')")
-    c.execute("CREATE TABLE IF NOT EXISTS tasks_demo (id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT, task_name TEXT, price TEXT, demo_field1 TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)")
-    c.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?)", (MAIN_ADMIN_ID,))
-    c.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('maintenance_off', '0')")
-    conn.commit()
-    conn.close()
-
-def get_user(uid):
-    conn = db(); c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE user_id=?", (uid,))
-    r = c.fetchone(); conn.close()
+def get_user(uid, name=""):
+    cur.execute("SELECT * FROM users WHERE id=?", (uid,))
+    r = cur.fetchone()
+    if not r:
+        cur.execute("INSERT INTO users (id,name) VALUES (?,?)", (uid, name))
+        conn.commit()
     return r
 
-def ensure_user(uid, name):
-    conn = db(); c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO users (user_id, name, balance) VALUES (?,?,0)", (uid, name))
-    c.execute("UPDATE users SET name=? WHERE user_id=?", (name, uid))
-    conn.commit(); conn.close()
-
 def is_admin(uid):
-    conn = db(); c = conn.cursor()
-    c.execute("SELECT 1 FROM admins WHERE user_id=?", (uid,))
-    r = c.fetchone(); conn.close()
-    return r is not None
+    if uid == OWNER_ID: return True
+    cur.execute("SELECT * FROM admins WHERE id=?", (uid,))
+    return cur.fetchone() is not None
 
-def is_maintenance_off():
-    conn = db(); c = conn.cursor()
-    c.execute("SELECT value FROM settings WHERE key='maintenance_off'")
-    r = c.fetchone(); conn.close()
-    return r and r["value"] == "1"
+def is_maintenance():
+    cur.execute("SELECT value FROM settings WHERE key='maintenance'")
+    return cur.fetchone()[0] == 'on'
 
-def set_maintenance(off: bool):
-    conn = db(); c = conn.cursor()
-    c.execute("UPDATE settings SET value=? WHERE key='maintenance_off'", ("1" if off else "0",))
-    conn.commit(); conn.close()
+def get_lang(uid):
+    cur.execute("SELECT lang FROM users WHERE id=?", (uid,))
+    r = cur.fetchone()
+    return r[0] if r else 'bn'
 
-# ===== KEYBOARDS =====
-def main_menu_kb(uid):
+# ---------- Keyboards ----------
+def user_menu(uid):
+    # Admin button only for admin/owner
     kb = [
-        [InlineKeyboardButton("👤 My Profile", callback_data="profile")],
-        [InlineKeyboardButton("📋 Task (Demo)", callback_data="user_tasks")],
-        [InlineKeyboardButton("💸 Withdraw", callback_data="withdraw")],
-        [InlineKeyboardButton("💰 Balance", callback_data="balance")],
+        [InlineKeyboardButton("💼 কাজ", callback_data="tasks")],
+        [InlineKeyboardButton("💵 ব্যালেন্স", callback_data="balance")],
+        [InlineKeyboardButton("📤 টাকা উত্তোলন", callback_data="withdraw")],
+        [InlineKeyboardButton("👥 মাই রেফারেল", callback_data="referral")],
+        [InlineKeyboardButton("📞 সাপোর্ট", callback_data="support")],
+        [InlineKeyboardButton("🎁🗄 গিফট কোড", callback_data="gift")],
+        [InlineKeyboardButton("🌐 ভাষা পরিবর্তন", callback_data="lang")],
+        [InlineKeyboardButton("🤝 পার্টনার বট", callback_data="partner")],
     ]
     if is_admin(uid):
-        kb.append([InlineKeyboardButton("🛠 Admin Panel", callback_data="admin_panel")])
+        kb.append([InlineKeyboardButton("🛡 অ্যাডমিন প্যানেল", callback_data="admin")])
     return InlineKeyboardMarkup(kb)
 
-def admin_kb():
+def admin_menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("👥 User Management", callback_data="adm_users")],
         [InlineKeyboardButton("💸 Withdraw Management", callback_data="adm_withdraw")],
@@ -83,404 +69,444 @@ def admin_kb():
         [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")],
     ])
 
-def back_kb(cb):
-    return InlineKeyboardMarkup([[InlineKeyboardButton("Back", callback_data=cb)]])
-
-async def send_to_all(context, text):
-    conn = db(); c = conn.cursor()
-    c.execute("SELECT user_id FROM users")
-    ids = [r["user_id"] for r in c.fetchall()]
-    conn.close()
-    s = 0; f = 0
-    for uid in ids:
-        try:
-            await context.bot.send_message(uid, text); s += 1
-        except: f += 1
-    return s, f
-
-user_state = {}
-temp_data = {}
-
-# ===== START =====
+# ---------- Start ----------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    ensure_user(uid, update.effective_user.first_name or "User")
-    if is_maintenance_off() and not is_admin(uid):
+    name = update.effective_user.first_name
+    get_user(uid, name)
+    # Referral
+    if context.args:
+        try:
+            ref = int(context.args[0].replace("start_", ""))
+            if ref != uid:
+                cur.execute("UPDATE users SET ref_by=? WHERE id=? AND ref_by=0", (ref, uid))
+                conn.commit()
+        except: pass
+    if is_maintenance() and not is_admin(uid):
         await update.message.reply_text("বট এখন সাময়িক সময়ের জন্য বন্ধ রাখা হয়েছে")
         return
-    u = get_user(uid)
-    await update.message.reply_text(
-        f"👋 স্বাগতম {update.effective_user.first_name}!\n💰 ব্যালেন্স: {u['balance']} টাকা",
-        reply_markup=main_menu_kb(uid)
-    )
+    await update.message.reply_text(f"🥰 স্বাগতম, {name}!\n💎কাজ শুরু করতে নিচের অপশনগুলো ব্যবহার করুন 🔽", reply_markup=user_menu(uid))
 
-# ===== CALLBACKS =====
-async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ---------- Callback ----------
+async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
     uid = q.from_user.id
     data = q.data
-    ensure_user(uid, q.from_user.first_name or "User")
-
-    if is_maintenance_off() and not is_admin(uid) and data != "main_menu":
-        await q.edit_message_text("বট এখন সাময়িক সময়ের জন্য বন্ধ রাখা হয়েছে")
+    get_user(uid, q.from_user.first_name)
+    if is_maintenance() and not is_admin(uid) and data not in ["main_menu"]:
+        await q.edit_message_text("বট এখন সাময়িক সময়ের জন্য বন্ধ রাখা হয়েছে", reply_markup=user_menu(uid))
         return
 
     if data == "main_menu":
-        user_state.pop(uid, None)
-        u = get_user(uid)
-        await q.edit_message_text(f"🏠 Main Menu\n💰 ব্যালেন্স: {u['balance']} টাকা", reply_markup=main_menu_kb(uid))
-        return
+        await q.edit_message_text(f"🥰 স্বাগতম, {q.from_user.first_name}!\n💎কাজ শুরু করতে নিচের অপশনগুলো ব্যবহার করুন 🔽", reply_markup=user_menu(uid))
 
-    if data == "profile":
-        u = get_user(uid)
-        await q.edit_message_text(f"👤 Profile\nID: {uid}\nনাম: {q.from_user.first_name}\n💰 ব্যালেন্স: {u['balance']} টাকা", reply_markup=back_kb("main_menu"))
-        return
+    elif data == "balance":
+        cur.execute("SELECT balance,total_income,done,pending,rejected FROM users WHERE id=?", (uid,))
+        b, ti, d, p, r = cur.fetchone()
+        cur.execute("SELECT COALESCE(SUM(amount),0) FROM withdraws WHERE user_id=? AND status='pending'", (uid,))
+        pend = cur.fetchone()[0]
+        await q.edit_message_text(f"💵 আপনার ব্যালেন্স\n━━━━━━━━━━━━━━━━━━━━━━\n💵 ব্যালেন্স: {b:.2f} BDT\n💸 পেন্ডিং (উইথড্র): {pend:.2f} BDT\n💰টোটাল ইনকাম: {ti:.2f} টাকা\n━━━━━━━━━━━━━━━━━━━━━━\n✅ সম্পন্ন কাজ: {d} টি\n⏳রিভিউতে আছে: {p} টি\n❌ রিজেক্টেড: {r} টি", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]]))
 
-    if data == "balance":
-        u = get_user(uid)
-        await q.edit_message_text(f"💰 আপনার ব্যালেন্স: {u['balance']} টাকা", reply_markup=back_kb("main_menu"))
-        return
-
-    # --- USER TASKS DEMO ---
-    if data == "user_tasks":
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📸 Instagram (Demo)", callback_data="ut_instagram")],
-            [InlineKeyboardButton("📧 Gmail (Demo)", callback_data="ut_gmail")],
-            [InlineKeyboardButton("📘 Facebook (Demo)", callback_data="ut_facebook")],
-            [InlineKeyboardButton("🏠 Main Menu", callback_data="main_menu")],
-        ])
-        await q.edit_message_text("📋 Task Management (সব ডেমো)\nএকটা বেছে নিন:", reply_markup=kb)
-        return
-
-    if data in ["ut_instagram", "ut_gmail", "ut_facebook"]:
-        key = data.replace("ut_", "")
-        conn = db(); c = conn.cursor()
-        c.execute("SELECT * FROM tasks_demo WHERE category=?", (key,))
-        rows = c.fetchall(); conn.close()
+    elif data == "tasks":
+        cur.execute("SELECT id,type,title,price FROM tasks")
+        rows = cur.fetchall()
         if not rows:
-            txt = "এখনো কোনো ডেমো কাজ নেই।"
-        else:
-            txt = "📋 ডেমো কাজের লিস্ট:\n\n"
-            for i, t in enumerate(rows, 1):
-                txt += f"{i}. {t['task_name']} - {t['price']} টাকা\n"
-        await q.edit_message_text(txt, reply_markup=back_kb("main_menu"))
-        return
+            await q.edit_message_text("এখনো কোনো কাজ নেই। পরে আবার চেষ্টা করুন।", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]]))
+            return
+        kb = [[InlineKeyboardButton(f"{t[1]} | {t[2]} - {t[3]} BDT", callback_data=f"task_{t[0]}")] for t in rows]
+        kb.append([InlineKeyboardButton("🔙 Back", callback_data="main_menu")])
+        await q.edit_message_text("💼 কাজগুলো নিচে দেওয়া হলো:", reply_markup=InlineKeyboardMarkup(kb))
 
-    if data == "withdraw":
-        user_state[uid] = "await_withdraw_amount"
-        await q.edit_message_text("💸 কত টাকা Withdraw করতে চান? টাকার পরিমাণ লিখুন:")
-        return
+    elif data.startswith("task_"):
+        tid = data.split("_")[1]
+        cur.execute("SELECT type,title,price,data FROM tasks WHERE id=?", (tid,))
+        t = cur.fetchone()
+        if not t: return
+        await q.edit_message_text(f"📋 কাজ: {t[1]}\n💰 দাম: {t[2]} BDT\n\nকাজটি করতে নিচের তথ্য পাঠান।\nএডমিন রিভিউ করার পর ব্যালেন্স যোগ হবে।", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("📤 সাবমিট করেছি", callback_data=f"submit_{tid}")],[InlineKeyboardButton("🔙 Back", callback_data="tasks")]]))
 
-    # --- ADMIN ---
-    if data == "admin_panel":
-        if not is_admin(uid):
-            await q.edit_message_text("আপনি অ্যাডমিন না।"); return
-        await q.edit_message_text("🛠 Admin Panel", reply_markup=admin_kb())
-        return
-
-    # USER MANAGEMENT
-    if data == "adm_users":
+    elif data == "withdraw":
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Total User", callback_data="adm_total")],
-            [InlineKeyboardButton("Search User", callback_data="adm_search")],
-            [InlineKeyboardButton("Add Balance", callback_data="adm_addbal")],
-            [InlineKeyboardButton("Remove Balance", callback_data="adm_rembal")],
-            [InlineKeyboardButton("Delete User Database History", callback_data="adm_del_hist")],
-            [InlineKeyboardButton("Back", callback_data="admin_panel")],
+            [InlineKeyboardButton("USDT (BEP-20) -> সর্বনিম্ন: 0.25(-0.05)", callback_data="wd_usdt")],
+            [InlineKeyboardButton("বিকাশ -> সর্বনিম্ন: ১১০৳(-১০)", callback_data="wd_bkash")],
+            [InlineKeyboardButton("নগদ", callback_data="wd_nagad")],
+            [InlineKeyboardButton("রকেট", callback_data="wd_rocket")],
+            [InlineKeyboardButton("🔙 Back", callback_data="main_menu")],
         ])
-        await q.edit_message_text("👥 User Management", reply_markup=kb); return
+        await q.edit_message_text("📤 টাকা তোলার মাধ্যম সিলেক্ট করুন:", reply_markup=kb)
 
-    if data == "adm_total":
-        conn = db(); c = conn.cursor()
-        c.execute("SELECT * FROM users")
-        rows = c.fetchall(); conn.close()
-        txt = f"👥 Total User: {len(rows)}\n\n"
-        for u in rows:
-            txt += f"ID: {u['user_id']} | {u['name']} | {u['balance']} টাকা\n"
-        await q.edit_message_text(txt[:4000] or "কেউ নেই", reply_markup=back_kb("adm_users")); return
+    elif data == "wd_usdt":
+        await q.edit_message_text("⚠️ USDT (BEP-20) উত্তোলন বর্তমানে বন্ধ আছে।", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="withdraw")]]))
+    elif data in ["wd_bkash","wd_nagad","wd_rocket"]:
+        method = {"wd_bkash":"বিকাশ","wd_nagad":"নগদ","wd_rocket":"রকেট"}[data]
+        context.user_data["wd_method"] = method
+        context.user_data["step"] = "wd_number"
+        await q.edit_message_text(f"📝 আপনার {method} নাম্বার দিন:")
 
-    if data == "adm_search":
-        user_state[uid] = "adm_search"
-        await q.edit_message_text("যে ইউজারকে খুঁজতে চান তার ইউজার আইডি দিন:"); return
-    if data == "adm_addbal":
-        user_state[uid] = "adm_addbal_id"
-        await q.edit_message_text("যে ইউজারের ব্যালেন্স বাড়াতে চান তার ইউজার আইডি দিন:"); return
-    if data == "adm_rembal":
-        user_state[uid] = "adm_rembal_id"
-        await q.edit_message_text("যে ইউজারের ব্যালেন্স কমাতে চান তার ইউজার আইডি দিন:"); return
-    if data == "adm_del_hist":
-        conn = db(); c = conn.cursor()
-        c.execute("DELETE FROM users WHERE user_id != ?", (uid,))
-        c.execute("DELETE FROM withdraws")
-        c.execute("DELETE FROM tasks_demo")
-        conn.commit(); conn.close()
-        await q.edit_message_text("✅ User Database History ডিলিট করা হয়েছে", reply_markup=back_kb("adm_users")); return
+    elif data == "referral":
+        cur.execute("SELECT COUNT(*), COALESCE(SUM(ref_earn),0) FROM users WHERE ref_by=?", (uid,))
+        # ref count
+        cur.execute("SELECT COUNT(*) FROM users WHERE ref_by=?", (uid,))
+        cnt = cur.fetchone()[0]
+        cur.execute("SELECT ref_earn FROM users WHERE id=?", (uid,))
+        earn = cur.fetchone()[0]
+        await q.edit_message_text(f"👤 মোট রেফার: {cnt}\n😃 মোট রেফারেল আয়: {earn:.2f} BDT\n🔗 আপনার রেফার লিংক:\nhttps://t.me/Nexora_X_Earn_Bot?start={uid}\n\nℹ️ আপনি আপনার প্রতিটি রেফারেলের সম্পূর্ণ করা কাজ থেকে আয়ের 10% কমিশন পাবেন।", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]]))
 
-    # WITHDRAW MANAGEMENT
-    if data == "adm_withdraw":
+    elif data == "support":
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("⏳ Pending", callback_data="wd_pending")],
-            [InlineKeyboardButton("✅ Approve", callback_data="wd_approved")],
-            [InlineKeyboardButton("❌ Reject", callback_data="wd_rejected")],
-            [InlineKeyboardButton("Back", callback_data="admin_panel")],
+            [InlineKeyboardButton("👨‍💻 অ্যাডমিন সাপোর্ট", url=f"https://t.me/{SUPPORT_BOT.replace('@','')}")],
+            [InlineKeyboardButton("📋 সাবমিশন চ্যানেল", url=SUBMISSION_CHANNEL)],
+            [InlineKeyboardButton("🔙 Back", callback_data="main_menu")],
         ])
-        await q.edit_message_text("💸 Withdraw Management", reply_markup=kb); return
+        await q.edit_message_text("📞 গ্রাহক সেবা কেন্দ্র\n━━━━━━━━━━━━━━━━━━━━━━\n\nসম্মানিত মেম্বার,\nআপনার যেকোনো সমস্যা বা জিজ্ঞাসার জন্য আমাদের সাপোর্ট টিমের সাথে যোগাযোগ করুন। আমরা দ্রুত সমাধানের চেষ্টা করব।\n⚠️ নোট: অযথা মেসেজ দেওয়া থেকে বিরত থাকুন।\nধন্যবাদ!", reply_markup=kb)
 
-    if data in ["wd_pending", "wd_approved", "wd_rejected"]:
-        status = {"wd_pending": "pending", "wd_approved": "approved", "wd_rejected": "rejected"}[data]
-        conn = db(); c = conn.cursor()
-        c.execute("SELECT * FROM withdraws WHERE status=?", (status,))
-        rows = c.fetchall(); conn.close()
+    elif data == "gift":
+        context.user_data["step"] = "gift_code"
+        await q.edit_message_text("🎁 গিফট কোড\n\nআপনার গিফট কোডের সিক্রেট কী লিখে পাঠান:")
+
+    elif data == "lang":
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🇧🇩 বাংলা", callback_data="lang_bn")],
+            [InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")],
+            [InlineKeyboardButton("🔙 Back", callback_data="main_menu")],
+        ])
+        await q.edit_message_text("ভাষা নির্বাচন করুন / Select Language:", reply_markup=kb)
+    elif data.startswith("lang_"):
+        lang = data.split("_")[1]
+        cur.execute("UPDATE users SET lang=? WHERE id=?", (lang, uid))
+        conn.commit()
+        txt = "ভাষা বাংলা করা হয়েছে। বটের সব বাটন, কোড, কাজ সব এখন বাংলা হবে।" if lang=="bn" else "Language set to English. All buttons and tasks will now be in English."
+        await q.edit_message_text(txt, reply_markup=user_menu(uid))
+
+    elif data == "partner":
+        await q.edit_message_text(f"😭 আপনার পার্টনার বট প্রোগ্রাম বর্তমানে বন্ধ আছে।\n\n✅ আপনার এক্সেস চালু করতে অ্যাডমিনের সাথে যোগাযোগ করুন⤵️\n➡️INBOX - {SUPPORT_BOT}", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]]))
+
+    # ---- ADMIN ----
+    elif data == "admin":
+        if not is_admin(uid): return
+        await q.edit_message_text("🛡 অ্যাডমিন প্যানেল", reply_markup=admin_menu())
+
+    elif data == "adm_users":
+        if not is_admin(uid): return
+        cur.execute("SELECT COUNT(*) FROM users")
+        total = cur.fetchone()[0]
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton(f"Total User: {total}", callback_data="adm_users")],
+            [InlineKeyboardButton("🔍 Search User", callback_data="adm_search")],
+            [InlineKeyboardButton("➕ Add Balance", callback_data="adm_addbal")],
+            [InlineKeyboardButton("➖ Remove Balance", callback_data="adm_removebal")],
+            [InlineKeyboardButton("🗑 Delete User Database History", callback_data="adm_deluser")],
+            [InlineKeyboardButton("🔙 Back", callback_data="admin")],
+        ])
+        await q.edit_message_text("👥 User Management", reply_markup=kb)
+
+    elif data in ["adm_search","adm_addbal","adm_removebal","adm_deluser"]:
+        context.user_data["step"] = data
+        prompts = {"adm_search":"Search করতে User ID পাঠান:", "adm_addbal":"Add Balance: User ID পাঠান:", "adm_removebal":"Remove Balance: User ID পাঠান:", "adm_deluser":"Delete করতে User ID পাঠান:"}
+        await q.edit_message_text(prompts[data])
+
+    elif data == "adm_withdraw":
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⏳ Pending", callback_data="wd_list_pending")],
+            [InlineKeyboardButton("✅ Approve", callback_data="wd_list_approve")],
+            [InlineKeyboardButton("❌ Reject", callback_data="wd_list_reject")],
+            [InlineKeyboardButton("🔙 Back", callback_data="admin")],
+        ])
+        await q.edit_message_text("💸 Withdraw Management", reply_markup=kb)
+
+    elif data.startswith("wd_list_"):
+        status = data.replace("wd_list_","")
+        if status=="approve": status="approved"
+        if status=="reject": status="rejected"
+        cur.execute("SELECT id,user_id,method,amount FROM withdraws WHERE status=?", (status,))
+        rows = cur.fetchall()
         if not rows:
-            await q.edit_message_text(f"কোনো {status} Withdraw নেই", reply_markup=back_kb("adm_withdraw")); return
-        kb = []; txt = f"💸 {status.upper()} List:\n\n"
-        for w in rows:
-            txt += f"ID: {w['id']} | User: {w['user_id']} | {w['amount']} টাকা\n"
-            if status == "pending":
-                kb.append([InlineKeyboardButton(f"✅ Approve #{w['id']}", callback_data=f"wd_appr_{w['id']}"), InlineKeyboardButton(f"❌ Reject #{w['id']}", callback_data=f"wd_rej_{w['id']}")])
-        kb.append([InlineKeyboardButton("Back", callback_data="adm_withdraw")])
-        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup(kb)); return
+            await q.edit_message_text(f"{status} এ কোনো উইথড্র নেই।", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="adm_withdraw")]]))
+            return
+        kb=[]
+        for r in rows:
+            kb.append([InlineKeyboardButton(f"#{r[0]} | {r[1]} | {r[2]} | {r[3]}", callback_data=f"wd_view_{r[0]}")])
+        kb.append([InlineKeyboardButton("🔙 Back", callback_data="adm_withdraw")])
+        await q.edit_message_text(f"💸 {status} লিস্ট:", reply_markup=InlineKeyboardMarkup(kb))
 
-    if data.startswith("wd_appr_"):
-        wid = int(data.split("_")[-1])
-        conn = db(); c = conn.cursor()
-        c.execute("SELECT * FROM withdraws WHERE id=?", (wid,))
-        w = c.fetchone()
-        if w:
-            c.execute("UPDATE withdraws SET status='approved' WHERE id=?", (wid,))
-            conn.commit()
-            try: await context.bot.send_message(w["user_id"], f"✅ আপনার {w['amount']} টাকা Withdraw Approve হয়েছে।")
-            except: pass
-        conn.close()
-        await q.edit_message_text("✅ Approve ঘরে চলে গেছে", reply_markup=back_kb("adm_withdraw")); return
-
-    if data.startswith("wd_rej_"):
-        wid = int(data.split("_")[-1])
-        conn = db(); c = conn.cursor()
-        c.execute("SELECT * FROM withdraws WHERE id=?", (wid,))
-        w = c.fetchone()
-        if w:
-            c.execute("UPDATE withdraws SET status='rejected' WHERE id=?", (wid,))
-            c.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (w["amount"], w["user_id"]))
-            conn.commit()
-            try: await context.bot.send_message(w["user_id"], f"❌ আপনার {w['amount']} টাকা Withdraw Reject হয়েছে। ব্যালেন্স ফেরত দেওয়া হয়েছে।")
-            except: pass
-        conn.close()
-        await q.edit_message_text("❌ Reject ঘরে চলে গেছে + ব্যালেন্স ফেরত দেওয়া হয়েছে", reply_markup=back_kb("adm_withdraw")); return
-
-    # TASK MANAGEMENT ADMIN
-    if data == "adm_tasks":
+    elif data.startswith("wd_view_"):
+        wid = data.split("_")[2]
+        cur.execute("SELECT user_id,method,number,amount,status FROM withdraws WHERE id=?", (wid,))
+        r = cur.fetchone()
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📸 Instagram (Demo)", callback_data="adm_t_instagram")],
-            [InlineKeyboardButton("📧 Gmail (Demo)", callback_data="adm_t_gmail")],
-            [InlineKeyboardButton("📘 Facebook (Demo)", callback_data="adm_t_facebook")],
-            [InlineKeyboardButton("Back", callback_data="admin_panel")],
+            [InlineKeyboardButton("✅ Approve", callback_data=f"wd_approve_{wid}")],
+            [InlineKeyboardButton("❌ Reject", callback_data=f"wd_reject_{wid}")],
+            [InlineKeyboardButton("🔙 Back", callback_data="adm_withdraw")],
         ])
-        await q.edit_message_text("📋 Task Management - ডেমো কাজ যোগ করুন", reply_markup=kb); return
+        await q.edit_message_text(f"ID: #{wid}\nUser: {r[0]}\nMethod: {r[1]}\nNumber: {r[2]}\nAmount: {r[3]}\nStatus: {r[4]}", reply_markup=kb)
 
-    if data in ["adm_t_instagram", "adm_t_gmail", "adm_t_facebook"]:
-        key = data.replace("adm_t_", "")
-        temp_data[uid] = {"task_key": key}
-        user_state[uid] = "adm_task_name"
-        await q.edit_message_text("কাজের নাম এবং টাকা দিন।\nএই ফরম্যাটে লিখুন: নাম | টাকা\nউদাহরণ: Instagram 2FA | 4.00\n\nআপনি যখন তখন টাকা পরিবর্তন করতে পারবেন - নতুন করে আবার যোগ করলেই হবে।")
-        return
+    elif data.startswith("wd_approve_"):
+        wid = data.split("_")[2]
+        cur.execute("UPDATE withdraws SET status='approved' WHERE id=?", (wid,))
+        conn.commit()
+        await q.edit_message_text(f"✅ #{wid} Approved হয়েছে।", reply_markup=admin_menu())
+        # notify user
+        cur.execute("SELECT user_id,amount,method FROM withdraws WHERE id=?", (wid,))
+        u, amt, meth = cur.fetchone()
+        try: await context.bot.send_message(u, f"✅ আপনার উইথড্র Approve হয়েছে।\n💰 Amount: {amt}\nMethod: {meth}")
+        except: pass
 
-    # BROADCAST
-    if data == "adm_broadcast":
-        user_state[uid] = "adm_broadcast"
-        await q.edit_message_text("📢 সবাইকে পাঠাতে চান এমন মেসেজটি লিখুন:"); return
+    elif data.startswith("wd_reject_"):
+        wid = data.split("_")[2]
+        cur.execute("SELECT user_id,amount FROM withdraws WHERE id=?", (wid,))
+        u, amt = cur.fetchone()
+        cur.execute("UPDATE withdraws SET status='rejected' WHERE id=?", (wid,))
+        cur.execute("UPDATE users SET balance=balance+? WHERE id=?", (amt, u))
+        conn.commit()
+        await q.edit_message_text(f"❌ #{wid} Rejected, ব্যালেন্স ফিরিয়ে দেওয়া হয়েছে।", reply_markup=admin_menu())
+        try: await context.bot.send_message(u, f"❌ আপনার উইথড্র Reject হয়েছে। ব্যালেন্স ফিরিয়ে দেওয়া হয়েছে: {amt} BDT")
+        except: pass
 
-    # ACCESS CONTROL
-    if data == "adm_access":
+    elif data == "adm_tasks":
         kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("👥 অ্যাডমিন লিস্ট", callback_data="acc_list")],
-            [InlineKeyboardButton("➕ অ্যাডমিন যোগ", callback_data="acc_add")],
-            [InlineKeyboardButton("➖ অ্যাডমিন রিমুভ", callback_data="acc_remove")],
-            [InlineKeyboardButton("Back", callback_data="admin_panel")],
+            [InlineKeyboardButton("📸 Instagram Task যোগ করুন", callback_data="task_add_ig")],
+            [InlineKeyboardButton("📧 Gmail Task যোগ করুন", callback_data="task_add_gmail")],
+            [InlineKeyboardButton("📘 Facebook Task যোগ করুন", callback_data="task_add_fb")],
+            [InlineKeyboardButton("📋 সব Task দেখুন", callback_data="task_list")],
+            [InlineKeyboardButton("🔙 Back", callback_data="admin")],
         ])
-        await q.edit_message_text("🔐 Access Control", reply_markup=kb); return
-    if data == "acc_list":
-        conn = db(); c = conn.cursor()
-        c.execute("SELECT * FROM admins")
-        rows = c.fetchall(); conn.close()
-        txt = f"👥 মোট অ্যাডমিন: {len(rows)}\n\n"
-        for a in rows: txt += f"ID: {a['user_id']}\n"
-        await q.edit_message_text(txt, reply_markup=back_kb("adm_access")); return
-    if data == "acc_add":
-        user_state[uid] = "acc_add"
-        await q.edit_message_text("যাকে অ্যাডমিন করবেন তার ইউজার আইডি দিন:"); return
-    if data == "acc_remove":
-        user_state[uid] = "acc_remove"
-        await q.edit_message_text("যাকে অ্যাডমিন থেকে সরাবেন তার ইউজার আইডি দিন:"); return
+        await q.edit_message_text("📋 Task Management - Instagram / Gmail / Facebook", reply_markup=kb)
 
-    # MAINTENANCE
-    if data == "adm_maint":
+    elif data in ["task_add_ig","task_add_gmail","task_add_fb"]:
+        context.user_data["step"] = data
+        context.user_data["task_tmp"] = {}
+        prompts = {"task_add_ig":"Instagram: কাজের নাম + টাকা দিন (যেমন: Follow | 10)", "task_add_gmail":"Gmail: কাজের নাম + টাকা দিন (যেমন: Gmail Create | 15)", "task_add_fb":"Facebook: কাজের নাম + টাকা দিন (যেমন: FB Create | 20)"}
+        await q.edit_message_text(prompts[data])
+    elif data == "task_list":
+        cur.execute("SELECT id,type,title,price FROM tasks")
+        rows = cur.fetchall()
+        txt = "\n".join([f"{r[0]}. {r[1]} - {r[2]} - {r[3]} BDT" for r in rows]) or "কোনো Task নেই"
+        await q.edit_message_text(txt, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="adm_tasks")]]))
+
+    elif data == "adm_broadcast":
+        context.user_data["step"] = "broadcast"
+        await q.edit_message_text("📢 Broadcast Message পাঠান (সব ইউজারদের কাছে যাবে):")
+
+    elif data == "adm_access":
+        if uid != OWNER_ID:
+            await q.edit_message_text("⚠️ শুধু Owner এই অপশন ব্যবহার করতে পারবে।", reply_markup=admin_menu())
+            return
+        cur.execute("SELECT id FROM admins")
+        lst = ", ".join([str(r[0]) for r in cur.fetchall()]) or "কেউ নেই"
+        kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📋 অ্যাডমিন লিস্ট", callback_data="adm_access")],
+            [InlineKeyboardButton("➕ অ্যাডমিন যোগ", callback_data="adm_addadmin")],
+            [InlineKeyboardButton("➖ অ্যাডমিন রিমুভ", callback_data="adm_remadmin")],
+            [InlineKeyboardButton("🔙 Back", callback_data="admin")],
+        ])
+        await q.edit_message_text(f"🔐 Access Control\nঅ্যাডমিন লিস্ট: {lst}\n\nআপনি কাকে অ্যাডমিন করবেন সব আপনি করবেন। অন্য কেউ আপনাকে না বলে আপনাকে অ্যাডমিন থেকে সরাতে পারবে না।", reply_markup=kb)
+    elif data in ["adm_addadmin","adm_remadmin"]:
+        context.user_data["step"] = data
+        await q.edit_message_text("অ্যাডমিনের User ID পাঠান:")
+
+    elif data == "adm_maint":
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("✅ বট চালু করুন", callback_data="maint_on")],
             [InlineKeyboardButton("⛔ বট বন্ধ করুন", callback_data="maint_off")],
             [InlineKeyboardButton("🔄 বট রিফ্রেশ করুন", callback_data="maint_refresh")],
             [InlineKeyboardButton("♻️ বট রিস্টার্ট করুন", callback_data="maint_restart")],
-            [InlineKeyboardButton("Back", callback_data="admin_panel")],
+            [InlineKeyboardButton("🔙 Back", callback_data="admin")],
         ])
-        await q.edit_message_text(f"🛠 Maintenance Mode\nবর্তমান: {'বন্ধ' if is_maintenance_off() else 'চালু'}", reply_markup=kb); return
-    if data == "maint_on":
-        set_maintenance(False)
-        s, f = await send_to_all(context, "✅ বট এখন চালু হয়েছে।")
-        await q.edit_message_text(f"✅ বট চালু হয়েছে। মেসেজ পেয়েছে {s} জন, ব্যর্থ {f} জন", reply_markup=back_kb("adm_maint")); return
-    if data == "maint_off":
-        set_maintenance(True)
-        s, f = await send_to_all(context, "⛔ বট এখন সাময়িক সময়ের জন্য বন্ধ রাখা হয়েছে।")
-        await q.edit_message_text(f"⛔ বট বন্ধ হয়েছে। মেসেজ পেয়েছে {s} জন", reply_markup=back_kb("adm_maint")); return
-    if data == "maint_refresh":
-        await q.edit_message_text("🔄 বট রিফ্রেশ করা হয়েছে (শুরু থেকে শেষ পর্যন্ত)", reply_markup=back_kb("adm_maint")); return
-    if data == "maint_restart":
-        await q.edit_message_text("♻️ বট রিস্টার্ট হয়েছে। কোনো ডাটা ডিলিট হয়নি, বট এখন দ্রুত কাজ করবে।", reply_markup=back_kb("adm_maint")); return
+        await q.edit_message_text("🛠 Maintenance Mode", reply_markup=kb)
+    elif data in ["maint_on","maint_off","maint_refresh","maint_restart"]:
+        if data == "maint_on":
+            cur.execute("UPDATE settings SET value='off' WHERE key='maintenance'"); conn.commit()
+            msg = "✅ বট চালু করা হয়েছে"
+        elif data == "maint_off":
+            cur.execute("UPDATE settings SET value='on' WHERE key='maintenance'"); conn.commit()
+            msg = "⛔ বট বন্ধ করা হয়েছে"
+        elif data == "maint_refresh":
+            msg = "🔄 বট রিফ্রেশ করা হয়েছে - শুরু থেকে শেষ পর্যন্ত"
+        else:
+            msg = "♻️ বট রিস্টার্ট হয়েছে। কোনো ডাটাবেজ / টাকা / কোড ডিলিট হয়নি, শুধু আপডেট হয়েছে। বট আরো দ্রুত কাজ করবে।"
+        await q.edit_message_text(msg, reply_markup=admin_menu())
+        # broadcast to all users
+        if data in ["maint_on","maint_off"]:
+            cur.execute("SELECT id FROM users")
+            for (u,) in cur.fetchall():
+                try: await context.bot.send_message(u, msg)
+                except: pass
 
-# ===== TEXT =====
+# ---------- Text Handler ----------
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    text = update.message.text.strip()
-    state = user_state.get(uid)
-    ensure_user(uid, update.effective_user.first_name or "User")
+    txt = update.message.text.strip()
+    step = context.user_data.get("step","")
+    get_user(uid, update.effective_user.first_name)
 
-    if is_maintenance_off() and not is_admin(uid):
-        await update.message.reply_text("বট এখন সাময়িক সময়ের জন্য বন্ধ রাখা হয়েছে"); return
-
-    if state == "await_withdraw_amount":
-        try:
-            amt = float(text)
-            u = get_user(uid)
-            if u["balance"] < amt:
-                await update.message.reply_text("❌ ব্যালেন্স যথেষ্ট নেই।"); return
-            conn = db(); c = conn.cursor()
-            c.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (amt, uid))
-            c.execute("INSERT INTO withdraws (user_id, amount, status) VALUES (?,?, 'pending')", (uid, amt))
-            wid = c.lastrowid
-            conn.commit(); conn.close()
-            user_state.pop(uid, None)
-            await update.message.reply_text(f"✅ Withdraw রিকোয়েস্ট পাঠানো হয়েছে। ID: {wid} | {amt} টাকা | Pending")
-        except: await update.message.reply_text("সঠিক টাকার পরিমাণ লিখুন।")
+    # Withdraw number
+    if step == "wd_number":
+        context.user_data["wd_number"] = txt
+        context.user_data["step"] = "wd_amount"
+        await update.message.reply_text("💰 টাকার পরিমাণ লিখুন:")
         return
-
-    if state == "adm_search":
-        user_state.pop(uid, None)
-        try:
-            u = get_user(int(text))
-            await update.message.reply_text(f"ID: {text}\nপাওয়া গেছে: {dict(u) if u else 'নেই'}")
-        except: await update.message.reply_text("সঠিক আইডি দিন।")
-        return
-
-    if state == "adm_addbal_id":
-        if text.isdigit():
-            temp_data[uid] = {"target": int(text)}
-            user_state[uid] = "adm_addbal_amt"
-            await update.message.reply_text("কত টাকা বাড়াতে চান সেটা লিখুন:")
-        else: await update.message.reply_text("সঠিক আইডি দিন।")
-        return
-    if state == "adm_addbal_amt":
-        target = temp_data.get(uid, {}).get("target")
-        try:
-            amt = float(text)
-            conn = db(); c = conn.cursor()
-            c.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amt, target))
-            conn.commit(); conn.close()
-            u = get_user(target)
-            if u:
-                try: await context.bot.send_message(target, f"✅ আপনার ব্যালেন্সে {amt} টাকা যোগ করা হয়েছে। নতুন ব্যালেন্স: {u['balance']} টাকা")
-                except: pass
-                await update.message.reply_text(f"✅ {target} এর ব্যালেন্স {amt} টাকা বাড়ানো হয়েছে।")
-            else: await update.message.reply_text("ইউজার পাওয়া যায়নি।")
-        except: await update.message.reply_text("সঠিক টাকা লিখুন।")
-        user_state.pop(uid, None); return
-
-    if state == "adm_rembal_id":
-        if text.isdigit():
-            temp_data[uid] = {"target": int(text)}
-            user_state[uid] = "adm_rembal_amt"
-            await update.message.reply_text("কত টাকা কমাতে চান সেটা লিখুন:")
-        else: await update.message.reply_text("সঠিক আইডি দিন।")
-        return
-    if state == "adm_rembal_amt":
-        target = temp_data.get(uid, {}).get("target")
-        try:
-            amt = float(text)
-            conn = db(); c = conn.cursor()
-            c.execute("UPDATE users SET balance = balance - ? WHERE user_id=?", (amt, target))
-            conn.commit(); conn.close()
-            u = get_user(target)
-            if u:
-                try: await context.bot.send_message(target, f"⚠️ আপনার ব্যালেন্স থেকে {amt} টাকা কমানো হয়েছে। নতুন ব্যালেন্স: {u['balance']} টাকা")
-                except: pass
-                await update.message.reply_text(f"✅ {target} এর ব্যালেন্স {amt} টাকা কমানো হয়েছে।")
-            else: await update.message.reply_text("ইউজার পাওয়া যায়নি।")
-        except: await update.message.reply_text("সঠিক টাকা লিখুন।")
-        user_state.pop(uid, None); return
-
-    if state == "adm_task_name":
-        try:
-            name, price = text.split("|")
-            temp_data[uid]["task_name"] = name.strip()
-            temp_data[uid]["price"] = price.strip()
-            user_state[uid] = "adm_task_demo_field"
-            await update.message.reply_text("এখন ডেমো ফিল্ড ১ দিন (আসল কিছু না, যেমন demo_text_1):")
+    if step == "wd_amount":
+        try: amt = float(txt)
         except:
-            await update.message.reply_text("এইভাবে লিখুন: নাম | টাকা\nযেমন: Instagram 2FA | 4.00")
-        return
-
-    if state == "adm_task_demo_field":
-        d = temp_data.get(uid, {})
-        conn = db(); c = conn.cursor()
-        c.execute("INSERT INTO tasks_demo (category, task_name, price, demo_field1) VALUES (?,?,?,?)", (d.get("task_key"), d.get("task_name"), d.get("price"), text))
-        conn.commit(); conn.close()
-        user_state.pop(uid, None)
-        await update.message.reply_text("✅ কাজ সফলভাবে যুক্ত হয়েছে (Demo)", reply_markup=admin_kb())
-        return
-
-    if state == "adm_broadcast":
-        user_state.pop(uid, None)
-        s, f = await send_to_all(context, text)
-        await update.message.reply_text(f"✅ মেসেজ সফল\nপাঠানো হয়েছে ১ টি\nমেসেজ পেয়েছে {s} জন\nমেসেজ ব্যর্থ হয়েছে {f} জন")
-        return
-
-    if state == "acc_add":
-        user_state.pop(uid, None)
-        try:
-            t = int(text)
-            ensure_user(t, "New Admin")
-            conn = db(); c = conn.cursor()
-            c.execute("INSERT OR IGNORE INTO admins (user_id) VALUES (?)", (t,))
-            conn.commit(); conn.close()
-            try: await context.bot.send_message(t, "🎉 আপনাকে অ্যাডমিন করা হয়েছে।")
+            await update.message.reply_text("সঠিক পরিমাণ লিখুন")
+            return
+        method = context.user_data.get("wd_method","বিকাশ")
+        number = context.user_data.get("wd_number","")
+        cur.execute("SELECT balance FROM users WHERE id=?", (uid,))
+        bal = cur.fetchone()[0]
+        if amt < 110 and method in ["বিকাশ","নগদ","রকেট"]:
+            await update.message.reply_text("সর্বনিম্ন ১১০৳ লাগবে")
+            return
+        if amt > bal:
+            await update.message.reply_text("ব্যালেন্স যথেষ্ট নেই")
+            return
+        cur.execute("UPDATE users SET balance=balance-? WHERE id=?", (amt, uid))
+        cur.execute("INSERT INTO withdraws (user_id,method,number,amount) VALUES (?,?,?,?)", (uid, method, number, amt))
+        wid = cur.lastrowid
+        conn.commit()
+        context.user_data["step"] = ""
+        await update.message.reply_text(f"✅ #{10800+wid} Payment Completed\n🗣 User Name: {update.effective_user.first_name}\n💰 Amount: ${amt*0.009:.4f} USDT\n✅ আপনার উইথড্র রিকোয়েস্ট সফলভাবে গ্রহণ করা হয়েছে : 🔷 {method}\n🕐 নাম্বার: {number}\n🔗 পরিমাণ: {amt} টাকা")
+        # notify admins
+        cur.execute("SELECT id FROM admins")
+        for (a,) in cur.fetchall():
+            try: await context.bot.send_message(a, f"🆕 নতুন উইথড্র #{wid}\nUser: {uid}\nMethod: {method}\nAmount: {amt}\nNumber: {number}")
             except: pass
-            await update.message.reply_text(f"✅ {t} কে অ্যাডমিন করা হয়েছে। মেসেজ চলে গেছে।")
-        except: await update.message.reply_text("সঠিক আইডি দিন।")
-        return
-
-    if state == "acc_remove":
-        user_state.pop(uid, None)
-        try:
-            t = int(text)
-            if t == MAIN_ADMIN_ID:
-                await update.message.reply_text("❌ মেইন অ্যাডমিনকে সরানো যাবে না।"); return
-            conn = db(); c = conn.cursor()
-            c.execute("DELETE FROM admins WHERE user_id=?", (t,))
-            conn.commit(); conn.close()
-            try: await context.bot.send_message(t, "⚠️ আপনাকে অ্যাডমিন থেকে সরিয়ে দেওয়া হয়েছে।")
+        if OWNER_ID:
+            try: await context.bot.send_message(OWNER_ID, f"🆕 নতুন উইথড্র #{wid}\nUser: {uid}\nMethod: {method}\nAmount: {amt}\nNumber: {number}")
             except: pass
-            await update.message.reply_text(f"✅ {t} কে অ্যাডমিন থেকে সরানো হয়েছে।")
-        except: await update.message.reply_text("সঠিক আইডি দিন।")
         return
 
-    await update.message.reply_text("🏠 মেনু দেখতে /start লিখুন", reply_markup=main_menu_kb(uid))
+    # Gift code
+    if step == "gift_code":
+        cur.execute("SELECT amount,used_by FROM gift_codes WHERE code=?", (txt,))
+        r = cur.fetchone()
+        if not r:
+            await update.message.reply_text("❌ ভুল গিফট কোড")
+            return
+        if str(uid) in r[1].split(","):
+            await update.message.reply_text("এই কোড আগেই ব্যবহার করেছেন")
+            return
+        amt = r[0]
+        cur.execute("UPDATE users SET balance=balance+?, total_income=total_income+? WHERE id=?", (amt, amt, uid))
+        cur.execute("UPDATE gift_codes SET used_by=? WHERE code=?", (r[1]+f",{uid}", txt))
+        conn.commit()
+        cur.execute("SELECT balance FROM users WHERE id=?", (uid,))
+        bal = cur.fetchone()[0]
+        context.user_data["step"] = ""
+        await update.message.reply_text(f"🎉 অভিনন্দন!\n\n✨ গিফট কোড সফলভাবে ক্লেইম হয়েছে।\n\n💸 আপনি পেয়েছেন: {amt} টাকা\n💸 বর্তমান ব্যালেন্স: {bal:.2f} BDT")
+        return
+
+    # Broadcast
+    if step == "broadcast":
+        cur.execute("SELECT id FROM users")
+        users = cur.fetchall()
+        ok = fail = 0
+        for (u,) in users:
+            try:
+                await context.bot.send_message(u, txt); ok+=1
+            except: fail+=1
+        context.user_data["step"] = ""
+        await update.message.reply_text(f"মেসেজ সফল\nপাঠানো হয়েছে ১ টি\nমেসেজ পেয়েছে {ok} জন\nমেসেজ ব্যর্থ হয়েছে {fail} জন")
+        return
+
+    # Admin add/remove balance
+    if step in ["adm_addbal","adm_removebal"]:
+        if "target_id" not in context.user_data:
+            try: context.user_data["target_id"] = int(txt)
+            except: await update.message.reply_text("সঠিক ID দিন"); return
+            await update.message.reply_text("টাকার পরিমাণ লিখুন:")
+            return
+        else:
+            try: amt = float(txt)
+            except: await update.message.reply_text("সঠিক টাকা দিন"); return
+            tid = context.user_data.pop("target_id")
+            if step == "adm_addbal":
+                cur.execute("UPDATE users SET balance=balance+?, total_income=total_income+? WHERE id=?", (amt, amt, tid))
+                msg = f"✅ আপনার ব্যালেন্সে {amt} BDT যোগ করা হয়েছে"
+            else:
+                cur.execute("UPDATE users SET balance=balance-? WHERE id=?", (amt, tid))
+                msg = f"➖ আপনার ব্যালেন্স থেকে {amt} BDT কাটা হয়েছে"
+            conn.commit()
+            context.user_data["step"] = ""
+            await update.message.reply_text("✅ হয়ে গেছে")
+            try: await context.bot.send_message(tid, msg)
+            except: pass
+            return
+
+    if step == "adm_search":
+        try: tid = int(txt)
+        except: await update.message.reply_text("সঠিক ID"); return
+        cur.execute("SELECT name,balance,total_income,done FROM users WHERE id=?", (tid,))
+        r = cur.fetchone()
+        context.user_data["step"] = ""
+        await update.message.reply_text(f"User: {r}" if r else "User পাওয়া যায়নি")
+        return
+
+    if step == "adm_deluser":
+        try: tid = int(txt)
+        except: return
+        cur.execute("DELETE FROM users WHERE id=?", (tid,))
+        cur.execute("DELETE FROM withdraws WHERE user_id=?", (tid,))
+        conn.commit()
+        context.user_data["step"] = ""
+        await update.message.reply_text("✅ User Database History Delete হয়েছে")
+        return
+
+    if step in ["adm_addadmin","adm_remadmin"]:
+        try: tid = int(txt)
+        except: return
+        if step == "adm_addadmin":
+            cur.execute("INSERT OR IGNORE INTO admins VALUES (?)", (tid,)); conn.commit()
+            try: await context.bot.send_message(tid, "🎉 আপনাকে অ্যাডমিন করা হয়েছে!")
+            except: pass
+            await update.message.reply_text("✅ অ্যাডমিন যোগ করা হয়েছে")
+        else:
+            if tid == OWNER_ID:
+                await update.message.reply_text("⚠️ Owner কে রিমুভ করা যাবে না")
+                return
+            cur.execute("DELETE FROM admins WHERE id=?", (tid,)); conn.commit()
+            await update.message.reply_text("✅ অ্যাডমিন রিমুভ করা হয়েছে")
+        context.user_data["step"] = ""
+        return
+
+    # Task Add - simple flow: Title | Price -> then second step asks for fields
+    if step in ["task_add_ig","task_add_gmail","task_add_fb"]:
+        # Expected: Title | Price
+        try:
+            title, price = txt.split("|")
+            price = float(price.strip())
+        except:
+            await update.message.reply_text("এইভাবে লিখুন: কাজের নাম | টাকা\nযেমন: Follow | 10")
+            return
+        typ = {"task_add_ig":"Instagram","task_add_gmail":"Gmail","task_add_fb":"Facebook"}[step]
+        cur.execute("INSERT INTO tasks (type,title,price,data) VALUES (?,?,?,?)", (typ, title.strip(), price, ""))
+        conn.commit()
+        context.user_data["step"] = f"task_fields_{cur.lastrowid}"
+        if typ=="Instagram":
+            await update.message.reply_text("এখন ইউজারনেম + পাসওয়ার্ড দিন (যেমন: user123 | pass123)\nঘর ৩টা: ইউজারনেম, পাসওয়ার্ড, 2FA Key")
+        elif typ=="Gmail":
+            await update.message.reply_text("এখন প্রথম নাম -> শেষ নাম -> ইমেইল -> পাসওয়ার্ড দিন")
+        else:
+            await update.message.reply_text("এখন প্রথম নাম -> শেষ নাম -> পাসওয়ার্ড দিন\nঘর ৪টা: প্রথম নাম, শেষ নাম, UID, কুকিজ")
+        return
+
+    if step and step.startswith("task_fields_"):
+        tid = step.split("_")[2]
+        cur.execute("UPDATE tasks SET data=? WHERE id=?", (txt, tid))
+        conn.commit()
+        context.user_data["step"] = ""
+        await update.message.reply_text("✅ কাজ সফলভাবে যুক্ত হয়েছে।")
+        return
+
+    # Default - if user sends gift code directly without button, ignore
+    await update.message.reply_text("মেনু থেকে অপশন বেছে নিন 👇", reply_markup=user_menu(uid))
 
 def main():
-    init_db()
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(callbacks))
+    app.add_handler(CallbackQueryHandler(callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
-    print("Bot running with SQLite...")
+    print("Bot Running...")
     app.run_polling()
 
 if __name__ == "__main__":
